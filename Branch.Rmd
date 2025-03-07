@@ -1,0 +1,113 @@
+```{r}
+simulate_branching <- function(t_max = 1000,
+                               initial_population,
+                               s = 0.032, fitness_function) {
+    #---Fitness function
+    lambda_k <- fitness_function
+    #---Initiate the system
+    #   Start with time=0
+    t <- 0
+    #   Start with no events
+    n_event <- 0
+    #   Start with 1 cell of type 1
+    if (is.null(initial_population)) {
+        population <- data.frame(k = c(1), Z_k = c(1))
+    } else {
+        population <- initial_population
+    }
+    #---Gillespie algorithm
+    while (t < t_max) {
+        #---Gillespie values
+        probs <- (population$Z_k * lambda_k(population$k))
+        rate_total <- sum(probs)
+        #print(rate_total)
+        probs <- probs / rate_total
+        #print(probs)
+        if (rate_total == 0) {
+            t <- t_max
+            break
+        }
+        #---Simulate time to next event
+        tau <- rexp(1, rate = rate_total)
+        #tau <- 1/rate_total
+        print(rate_total)
+        t <- t + tau
+        print(tau)
+        print(t)
+        if(t > t_max){
+          break
+        }
+        #---Simulate clone to have next event
+        l <- sample(population$k, size = 1, prob = probs)
+        #print(probs)
+        #---Simulate types for progeny cells
+        l1 <- rbinom(1, size = 2 * l, prob = 0.5)
+        l2 <- 2 * l - l1
+        #---Update the population sizes
+        population$Z_k[population$k == l] <- population$Z_k[population$k == l] - 1
+        if (l1 %in% population$k) {
+            population$Z_k[population$k == l1] <- population$Z_k[population$k == l1] + 1
+        } else {
+            population <- rbind(population, data.frame(k = l1, Z_k = 1))
+        }
+        if (l2 %in% population$k) {
+            population$Z_k[population$k == l2] <- population$Z_k[population$k == l2] + 1
+        } else {
+            population <- rbind(population, data.frame(k = l2, Z_k = 1))
+        }
+        population <- population[population$k != 0, ]
+        #population <- population[population$Z_k != 0, ]
+        # history[[length(history) + 1]] <- list(t = t, tau = tau, population = initial_population)
+        n_event <- n_event + 1
+        print(n_event)
+        print("-----------------------------")
+    }
+    return(list(final_time = t, population = population, n_event = n_event))
+}
+```
+
+```{r}
+iteration <- function(n, t_range, s, initial_population = NULL) {
+  results <- list()
+  for (i in 1:n) {
+    tmax <- sample(t_range, 1)  
+    result <- simulate_branching(tmax,initial_population, s)
+    results[[i]] <- list(t_selected = tmax, simulation_result = result)
+  }
+  return(results)
+}
+```
+
+```{r}
+t = 6
+s = 0.05
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["linear"]]
+result <- simulate_branching(t,initial_population, s, fitness_functions1)
+
+```
+
+```{r}
+t = 6
+s = 0.05
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["linear"]]
+result <- simulate_branching(t,initial_population, s, fitness_functions1)
+
+```

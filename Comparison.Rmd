@@ -1,0 +1,470 @@
+```{r}
+simulate_branching <- function(t_max = 1000,
+                               initial_population,
+                               s = 0.032, fitness_function) {
+    #---Fitness function
+    lambda_k <- fitness_function
+    #---Initiate the system
+    #   Start with time=0
+    t <- 0
+    #   Start with no events
+    n_event <- 0
+    #   Start with 1 cell of type 1
+    if (is.null(initial_population)) {
+        population <- data.frame(k = c(1), Z_k = c(1))
+    } else {
+        population <- initial_population
+    }
+    #---Gillespie algorithm
+    while (t < t_max) {
+        #---Gillespie values
+        probs <- (population$Z_k * lambda_k(population$k))
+        rate_total <- sum(probs)
+        #print(rate_total)
+        probs <- probs / rate_total
+        #print(probs)
+        if (rate_total == 0) {
+            t <- t_max
+            break
+        }
+        #---Simulate time to next event
+        tau <- rexp(1, rate = rate_total)
+        t <- t + tau
+        if(t > t_max){
+          break
+        }
+        #---Simulate clone to have next event
+        l <- sample(population$k, size = 1, prob = probs)
+        #---Simulate types for progeny cells
+        l1 <- rbinom(1, size = 2 * l, prob = 0.5)
+        l2 <- 2 * l - l1
+        #---Update the population sizes
+        population$Z_k[population$k == l] <- population$Z_k[population$k == l] - 1
+        if (l1 %in% population$k) {
+            population$Z_k[population$k == l1] <- population$Z_k[population$k == l1] + 1
+        } else {
+            population <- rbind(population, data.frame(k = l1, Z_k = 1))
+        }
+        if (l2 %in% population$k) {
+            population$Z_k[population$k == l2] <- population$Z_k[population$k == l2] + 1
+        } else {
+            population <- rbind(population, data.frame(k = l2, Z_k = 1))
+        }
+        population <- population[population$k != 0, ]
+        #population <- population[population$Z_k != 0, ]
+        # history[[length(history) + 1]] <- list(t = t, tau = tau, population = initial_population)
+        n_event <- n_event + 1
+    }
+    return(list(final_time = t, population = population, n_event = n_event))
+}
+```
+
+```{r}
+iteration <- function(n, t_range, s, initial_population = NULL) {
+  results <- list()
+  for (i in 1:n) {
+    tmax <- sample(t_range, 1)  
+    result <- simulate_branching(tmax,initial_population, s)
+    results[[i]] <- list(t_selected = tmax, simulation_result = result)
+  }
+  return(results)
+}
+```
+
+```{r}
+library(Matrix)
+library(expm)  
+simulate_expectation_matrix <- function(lambda_function, k_max, t) {
+  # Compute Lambda matrix (diagonal matrix with lambda_k values)
+  Lambda_values <- sapply(1:k_max, lambda_function)
+  Lambda <- diag(Lambda_values)
+
+  # Construct A matrix (transition probabilities for DNA copy distribution)
+  A <- matrix(0, nrow = k_max, ncol = k_max)
+  for (k in 1:k_max) {
+    for (l in 1:(2 * k)) {
+      if (l <= k_max) {
+        A[l, k] <- choose(2 * k, l) * (0.5)^(2 * k)  # Binomial distribution
+      }
+    }
+  }
+
+  # Compute (2A - I) transformation
+  A_transformed <- 2 * A - diag(rep(1, k_max))
+
+  # Compute matrix exponential exp(tΛ(2A - I))
+  M_t <- expm(t * Lambda %*% A_transformed)
+
+  # Set initial condition: one cell with one DNA copy
+  M0 <- rep(0, k_max)
+  M0[1] <- 1  # Initial cell at k = 1
+
+  # Compute M(t)
+  M_t_result <- M_t %*% M0
+  return(as.vector(M_t_result))  # Return result as a vector
+}
+```
+
+```{r}
+comparison <- function(n_simulations, t, s, initial_population, fitness_functions, interval){
+  library(dplyr)
+  library(ggplot2)
+  all_data_1 <- data.frame()
+  all_data_2 <- data.frame()
+  all_data_3 <- data.frame()
+  #simulation
+  for (i in 1:n_simulations) {
+    result <- simulate_branching(t-interval, initial_population, s, fitness_functions1)
+    population_df <- result$population
+    #total_Z_k <- sum(population_df$Z_k)
+    #population_df$Z_k <- (population_df$Z_k / total_Z_k)
+  
+    population_df$simulation_id <- i 
+    all_data_1 <- bind_rows(all_data_1, population_df) 
+    #print(i)
+  }
+  
+  print("t1 finished")
+  for (i in 1:n_simulations) {
+    result <- simulate_branching(t, initial_population, s, fitness_functions1)
+    population_df <- result$population
+    #total_Z_k <- sum(population_df$Z_k)
+    #population_df$Z_k <- (population_df$Z_k / total_Z_k)
+  
+    population_df$simulation_id <- i 
+    all_data_2 <- bind_rows(all_data_2, population_df) 
+    #print(i)
+  }
+  print("t2 finished")
+  for (i in 1:n_simulations) {
+    result <- simulate_branching(t+interval, initial_population, s, fitness_functions1)
+    population_df <- result$population
+    #total_Z_k <- sum(population_df$Z_k)
+    #population_df$Z_k <- (population_df$Z_k / total_Z_k)
+
+    population_df$simulation_id <- i
+    all_data_3 <- bind_rows(all_data_3, population_df)
+    #print(i)
+  }
+  print("t3 finished")
+  #calculation
+  k_max_1 <-max(all_data_1$k)
+  k_max_2 <-max(all_data_2$k)
+  k_max_3 <-max(all_data_3$k)
+  k_max_3 <- 120
+  results_1 <- simulate_expectation_matrix(fitness_functions1, k_max_1, t-interval)
+  #results <- results/sum(results)
+  results_1 <- data.frame(k = 1:k_max_1, value = results_1)
+  
+  results_2 <- simulate_expectation_matrix(fitness_functions1, k_max_2, t)
+  #results <- results/sum(results)
+  results_2 <- data.frame(k = 1:k_max_2, value = results_2)
+  
+  results_3 <- simulate_expectation_matrix(fitness_functions1, k_max_3, t+interval)
+  #results <- results/sum(results)
+  results_3 <- data.frame(k = 1:k_max_3, value = results_3)
+  
+  #graph
+  avg_population_1 <- all_data_1 %>%
+    group_by(k) %>%
+    summarise(mean_Z_k = sum(Z_k)/n_simulations)
+  
+  avg_population_2 <- all_data_2 %>%
+    group_by(k) %>%
+    summarise(mean_Z_k = sum(Z_k)/n_simulations)
+  
+  avg_population_3 <- all_data_3 %>%
+    group_by(k) %>%
+    summarise(mean_Z_k = sum(Z_k)/n_simulations)
+  
+  plot_title <- paste("Comparison of Z_k\n",
+                      "s =", s, ", t =", t)
+  
+  avg_population_1$time <- paste("t =", t-interval)
+  avg_population_2$time <- paste("t =", t)
+  avg_population_3$time <- paste("t =", t+interval)
+
+  results_1$time <- paste("t =", t-interval)
+  results_2$time <- paste("t =", t)
+  results_3$time <- paste("t =", t+interval)
+
+  avg_population_all <- bind_rows(avg_population_1, avg_population_2, avg_population_3)
+  results_all <- bind_rows(results_1, results_2, results_3)
+  #results_all <- bind_rows(results_1, results_2)
+  
+  ggplot() +
+    geom_bar(data = avg_population_all, aes(x = k, y = mean_Z_k, fill = time), 
+            stat = "identity", position = "dodge", alpha = 0.6, width = 0.8) +
+  
+    geom_line(data = results_all, aes(x = k, y = value, color = time), size = 1) +
+  
+    labs(title = "Comparison of Z_k Over Different Time Points",
+        x = "k", y = "Mean Z_k") +
+    scale_fill_manual(values = c("blue", "green","orange")) + 
+    scale_color_manual(values = c("blue", "green","orange")) +
+    #scale_color_manual(values = c("blue", "green")) +
+    theme_minimal()
+
+}
+```
+
+```{r}
+z_score<-function(n_simulations, t, s, initial_population, fitness_functions){
+  library(dplyr)
+  library(ggplot2)
+  all_data <- data.frame()
+  #simulation
+  for (i in 1:n_simulations) {
+  result <- simulate_branching(t, initial_population, s, fitness_functions1)
+  population_df <- result$population
+  total_Z_k <- sum(population_df$Z_k)
+  population_df$Z_k <- (population_df$Z_k / total_Z_k)
+  
+  all_data <- bind_rows(all_data, population_df)  
+  }
+  
+  summary_data <- all_data %>%
+    group_by(k) %>%
+    summarise(
+      mean_Z_k = mean(Z_k, na.rm = TRUE),
+      var_Z_k = var(Z_k, na.rm = TRUE)
+    )
+  
+  k_max <- max(summary_data$k)
+  theoretical_Z_k <- simulate_expectation_matrix(fitness_functions, k_max, t)
+  theoretical_Z_k <- theoretical_Z_k / sum(theoretical_Z_k)  # Normalize
+  
+  theory_df <- data.frame(k = 1:k_max, expected_Z_k = theoretical_Z_k)
+  results <- data.frame(k = 1:k_max, value = theoretical_Z_k)
+  
+  z_score_df <- summary_data %>%
+    left_join(theory_df, by = "k") %>%
+    mutate(
+      Z_score = (mean_Z_k - expected_Z_k) / sqrt(var_Z_k)
+    )
+  
+  library(gridExtra)
+  
+  p1<-ggplot(z_score_df, aes(x = k, y = Z_score)) +
+    geom_point(color = "blue") +
+    geom_line(color = "blue") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+    labs(
+      title = "Z-score of Simulation vs. Theoretical Expectation",
+      x = "k",
+      y = "Z-score"
+    ) +
+    theme_minimal()
+  
+  avg_population <- all_data %>%
+    group_by(k) %>%
+    summarise(mean_Z_k = sum(Z_k, na.rm = TRUE)/n_simulations)
+  
+  p2<-ggplot(avg_population, aes(x = k, y = mean_Z_k)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    labs(title = "Average Z_k", x = "k", y = "Mean Z_k") +
+    geom_line(data = results, aes(x = k, y = value), color = "red", size = 1) +
+    theme_minimal()
+  
+  grid.arrange(p1, p2, ncol = 1)
+  
+}
+
+```
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.025
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["linear"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+
+
+```
+
+```{r}
+n_simulations <- 300
+t <- 5
+interval <- 1
+s <- 0.05
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["linear"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1,interval)
+
+
+```
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.075
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["linear"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+
+
+```
+
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.025
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["log(1+k)"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.05
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["log(1+k)"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.075
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+
+fitness_functions1 <- fitness_functions[["log(1+k)"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```
+
+
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.025
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 },  # Baseline scenario
+  "logistic" = function(k) {1+s/(1+exp(-k))},
+  "logisticm" = function(k) {1+L/(1+exp(-s(k-k_0)))}
+)
+
+fitness_functions1 <- fitness_functions[["logistic"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```
+
+
+
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.05
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 },  # Baseline scenario
+  "logistic" = function(k) {1+s/(1+exp(-k))},
+  "logisticm" = function(k) {1+L/(1+exp(-s(k-k_0)))}
+)
+
+fitness_functions1 <- fitness_functions[["logistic"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```
+
+```{r}
+n_simulations <- 100
+t <- 5
+interval <- 2
+s <- 0.075
+initial_population <- data.frame(k = c(1), Z_k = c(1))
+
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^k"  = function(k) { (1 + s)^k },
+  "linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 },  # Baseline scenario
+  "logistic" = function(k) {1+s/(1+exp(-k))},
+  "logisticm" = function(k) {1+L/(1+exp(-s(k-k_0)))}
+)
+
+fitness_functions1 <- fitness_functions[["logistic"]]
+
+comparison(n_simulations, t, s, initial_population, fitness_functions1)
+```

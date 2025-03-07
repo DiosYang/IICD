@@ -1,0 +1,139 @@
+```{r}
+#calculation of p(k1, k2 | k)
+binomial_prob <- function(k1, k, k2) {
+  if (k1 + k2 != 2 * k) return(0) 
+  return(choose(2 * k, k1) * (0.5)^(2 * k))
+}
+
+#pgf f^(k)(u1, u2)
+pgf <- function(k, u1, u2) {
+  return(((u1 + u2) / 2)^(2 * k))
+}
+```
+
+```{r}
+library(Matrix)
+library(expm)
+
+# Set parameters
+k_max <- 50  # Maximum number of DNA copies to track
+t <- 13      # Time point for evaluation
+s <- 0.022   # Fitness parameter
+
+# Define different fitness functions (lambda_k)
+fitness_functions <- list(
+  "log(1+k)" = function(k) { 1 + s * log(1 + k) },
+  "(1+s)^2"  = function(k) { (1 + s)^2 },
+  #"linear"   = function(k) { 1 + s * k },
+  "log(log(1+k))" = function(k) { 1 + s * log(1 + log(1 + k)) },
+  "constant" = function(k) { 1 }  # Baseline scenario
+)
+```
+
+```{r}
+simulate_expectation_matrix <- function(lambda_function, k_max, t) {
+  # Compute Lambda matrix (diagonal matrix with lambda_k values)
+  Lambda_values <- sapply(1:k_max, lambda_function)
+  Lambda <- diag(Lambda_values)
+
+  # Construct A matrix (transition probabilities for DNA copy distribution)
+  A <- matrix(0, nrow = k_max, ncol = k_max)
+  for (k in 1:k_max) {
+    for (l in 1:(2 * k)) {
+      if (l <= k_max) {
+        A[k, l] <- choose(2 * k, l) * (0.5)^(2 * k)  # Binomial distribution
+      }
+    }
+  }
+
+  # Compute (2A - I) transformation
+  A_transformed <- 2 * A - diag(rep(1, k_max))
+
+  # Compute matrix exponential exp(tΛ(2A - I))
+  M_t <- expm(t * Lambda %*% A_transformed)
+
+  # Set initial condition: one cell with one DNA copy
+  M0 <- rep(0, k_max)
+  M0[1] <- 1  # Initial cell at k = 1
+
+  # Compute M(t)
+  M_t_result <- M_t %*% M0
+  return(as.vector(M_t_result))  # Return result as a vector
+}
+```
+
+
+```{r}
+# Store results for different fitness functions
+results <- list()
+for (name in names(fitness_functions)) {
+  results[[name]] <- simulate_expectation_matrix(fitness_functions[[name]], k_max, t)
+}
+
+# Plot comparison of different fitness functions
+plot(1:k_max, results[[1]], type = "l", lwd = 2, col = 1, ylim = c(0, max(sapply(results, max))),
+     xlab = "k (DNA copies)", ylab = "M_k,i(t)",
+     main = paste("Comparison of Fitness Functions at t =", t))
+
+# Add multiple curves for each fitness function
+legend_colors <- 1:length(fitness_functions)
+legend_labels <- names(fitness_functions)
+
+for (i in 2:length(results)) {
+  lines(1:k_max, results[[i]], col = legend_colors[i], lwd = 2)
+}
+
+# Add legend to the plot
+legend("topright", legend = legend_labels, col = legend_colors, lwd = 2)
+```
+
+
+
+
+
+
+```{r}
+library(Matrix)
+library(expm)  
+
+k_max <- 200 
+s <- 0.05
+
+#lambda_k <- function(k) { 1 + s * log(1 + k) }
+#lambda_k <- function(k) { (1+s)^2 }
+lambda_k <- function(k) { 1 + s * k }
+#lambda_k <- function(k) { 1 + s * log(1+log(1+k)) }
+#lambda_k <- function(k) { 1 }
+
+Lambda_values <- sapply(1:k_max, lambda_k)
+Lambda <- diag(Lambda_values)
+
+
+A <- matrix(0, nrow = k_max, ncol = k_max)
+for (k in 1:k_max) {
+  for (l in 1:(2 * k)) {
+    if (l <= k_max) {
+      A[l, k] <- choose(2 * k, l) * (0.5)^(2 * k)  
+    }
+  }
+}
+
+A_transformed <- 2 * A - diag(rep(1, k_max))
+
+t <- 2
+M_t <- expm(t * Lambda %*% A_transformed) 
+
+M0 <- rep(0, k_max)
+M0[1] <- 1  #i=1
+
+M_t_result <- M_t %*% M0
+
+plot(1:k_max, M_t_result, type = "b", pch = 19, col = "blue",
+     xlab = "k", ylab = "M_k,i(t)", 
+     main = paste("Expectation Matrix at t =", t))
+
+```
+
+
+
+
